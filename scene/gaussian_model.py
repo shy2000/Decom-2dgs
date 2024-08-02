@@ -76,8 +76,8 @@ class GaussianModel:
         self.spatial_lr_scale = 0
         self.setup_functions()
 
-    def capture(self, include_feature=False):
-        if include_feature:
+    def capture(self, mode='default',object_indices=None):
+        if mode=='Features':
             assert self._instance_feature is not None, "empty instance feature!"
             return (
                 self.active_sh_degree,
@@ -95,6 +95,20 @@ class GaussianModel:
                 self.optimizer.state_dict(),
                 self.spatial_lr_scale,
             )
+        elif mode=='Objects':
+            assert object_indices is not None, "empty object!"
+            return (
+                self.active_sh_degree,
+                self._xyz[object_indices],
+                self._features_dc[object_indices],
+                self._features_rest[object_indices],
+                self._scaling[object_indices],
+                self._rotation[object_indices],
+                self._opacity[object_indices],
+                self.max_radii2D[object_indices],
+                self.spatial_lr_scale,
+            )
+
         else:    
             return (
                 self.active_sh_degree,
@@ -111,7 +125,7 @@ class GaussianModel:
                 self.spatial_lr_scale,
             )
     
-    def restore(self, model_args, training_args,mode='train'):
+    def restore(self, model_args, training_args=None,mode='train'):
         if len(model_args) == 14: # 这是一个feature训练时保存的ckpt
             (self.active_sh_degree, 
             self._xyz, 
@@ -127,6 +141,16 @@ class GaussianModel:
             denom,
             opt_dict, 
             self.spatial_lr_scale) = model_args
+        elif len(model_args) == 9:
+            (self.active_sh_degree, 
+            self._xyz, 
+            self._features_dc, 
+            self._features_rest,
+            self._scaling, 
+            self._rotation, 
+            self._opacity,
+            self.max_radii2D, 
+            self.spatial_lr_scale) = model_args  
         else:
             (self.active_sh_degree, 
             self._xyz, 
@@ -175,14 +199,23 @@ class GaussianModel:
             return self._instance_feature
         else:
             raise ValueError('NO instance feature!')
-    def get_ids(self,classifier):
-        return(classifier(self._instance_feature))
-    
+    @property  
+    def get_ids(self):
+        if self.ids is not None:
+            return self.ids
+        else:
+            raise ValueError('NO ids!')
+        
+    def set_ids(self,ids):
+        self.ids=ids
+
     def get_covariance(self, scaling_modifier = 1):
         return self.covariance_activation(self.get_xyz, self.get_scaling, scaling_modifier, self._rotation)
 
     #def init_classifier(self,classifier):
     #    self.classifier=classifier
+
+
 
     def oneupSHdegree(self):
         if self.active_sh_degree < self.max_sh_degree:

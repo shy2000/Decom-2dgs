@@ -212,13 +212,28 @@ def training_feature(dataset, opt, pipe, testing_iterations, saving_iterations, 
             label=classifier(instance_image.permute(1, 2, 0))
             path=os.path.join(result_path,f'id{idx:05d}.png')
             saveRGB(label,path)
+        features=gaussians.get_instance_feature
+        ids = classifier(features)
+        ids = ids.argmax(dim=1, keepdim=True)
+        gaussians.set_ids(ids.to(torch.int16))
+        print("\n[ITER {}] Saving Checkpoint".format(iteration))
+        torch.save((gaussians.capture('Features'), iteration), scene.model_path + "/chkpnt_with_feature" + str(iteration) + ".pth")
+        torch.save(classifier, scene.model_path +"/classifier_chkpnt"+str(iteration)+'.pth')
 
 
-def saveRGB(label,path,alpha=15):
+def saveRGB(label,path,k=12):
     img=label.view(384,384,-1)
-    id_vis=img.argmax(dim=2, keepdim=True).expand(-1, -1, 3)
+    img=img.argmax(dim=2, keepdim=True).expand(-1, -1, 3)
+    bg=(img==k)
+    id_vis=img*255/(k+1)
+    id_vis[:,:,1]=(id_vis[:,:,1]*23)%256
+    id_vis[:,:,2]=(id_vis[:,:,2]*13)%256
+
+    id_vis=id_vis*(~bg).int()+bg.int()*255
+
     id_vis=np.array(id_vis.cpu(),dtype=np.uint8)
-    plt.imsave(path,id_vis*alpha, cmap='viridis')
+    
+    plt.imsave(path,id_vis, cmap='viridis')
 
 def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoint_iterations, checkpoint):
     first_iter = 0
