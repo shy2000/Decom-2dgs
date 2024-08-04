@@ -22,18 +22,21 @@ from utils.graphics_utils import BasicPointCloud
 from utils.general_utils import strip_symmetric, build_scaling_rotation
 
 class MLP(nn.Module):
-    def __init__(self, input_dim=3, hidden_dim=72, output_dim=13):
+    def __init__(self, input_dim, hidden_dim, output_dim):
         super(MLP, self).__init__()
         self.fc1 = nn.Linear(input_dim, hidden_dim)
         self.relu = nn.ReLU()
-        self.fc2 = nn.Linear(hidden_dim, output_dim)
+        self.fc2 = nn.Linear(hidden_dim, hidden_dim)
+        self.fc3 = nn.Linear(hidden_dim, output_dim)
         self.softmax = nn.Softmax(dim=1)
 
     def forward(self, x):
         x = self.fc1(x)
         x = self.relu(x)
         x = self.fc2(x)
-        x = self.softmax(x)
+        x = self.relu(x)
+        x = self.fc3(x) 
+        #x = self.softmax(x)
         return x
 
 class GaussianModel:
@@ -97,6 +100,7 @@ class GaussianModel:
             )
         elif mode=='Objects':
             assert object_indices is not None, "empty object!"
+            assert self._instance_feature[object_indices] is not None, "empty features!"
             return (
                 self.active_sh_degree,
                 self._xyz[object_indices],
@@ -105,6 +109,7 @@ class GaussianModel:
                 self._scaling[object_indices],
                 self._rotation[object_indices],
                 self._opacity[object_indices],
+                self._instance_feature[object_indices],
                 self.max_radii2D[object_indices],
                 self.spatial_lr_scale,
             )
@@ -141,7 +146,7 @@ class GaussianModel:
             denom,
             opt_dict, 
             self.spatial_lr_scale) = model_args
-        elif len(model_args) == 9:
+        elif len(model_args) == 10:
             (self.active_sh_degree, 
             self._xyz, 
             self._features_dc, 
@@ -149,8 +154,9 @@ class GaussianModel:
             self._scaling, 
             self._rotation, 
             self._opacity,
+            self._instance_feature,
             self.max_radii2D, 
-            self.spatial_lr_scale) = model_args  
+            self.spatial_lr_scale,) = model_args  
         else:
             (self.active_sh_degree, 
             self._xyz, 

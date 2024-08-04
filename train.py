@@ -16,7 +16,7 @@ from random import randint
 from utils.loss_utils import l1_loss, ssim, l2_loss,mask_mse,mask_cross_entropy
 from gaussian_renderer import render, network_gui
 import sys
-from scene import Scene, GaussianModel
+from scene import Scene, GaussianModel, MLP
 from utils.general_utils import safe_state
 import uuid
 from tqdm import tqdm
@@ -34,23 +34,7 @@ try:
 except ImportError:
     TENSORBOARD_FOUND = False
 
-class MLP(nn.Module):
-    def __init__(self, input_dim, hidden_dim, output_dim):
-        super(MLP, self).__init__()
-        self.fc1 = nn.Linear(input_dim, hidden_dim)
-        self.relu = nn.ReLU()
-        self.fc2 = nn.Linear(hidden_dim, hidden_dim)
-        self.fc3 = nn.Linear(hidden_dim, output_dim)
-        self.softmax = nn.Softmax(dim=1)
 
-    def forward(self, x):
-        x = self.fc1(x)
-        x = self.relu(x)
-        x = self.fc2(x)
-        x = self.relu(x)
-        x = self.fc3(x) 
-        #x = self.softmax(x)
-        return x
 
 def training_feature(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoint_iterations, checkpoint):
 
