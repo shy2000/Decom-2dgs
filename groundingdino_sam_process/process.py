@@ -7,7 +7,7 @@ import torch
 import os, sys
 from PIL import Image
 from glob import glob
-import tqdm
+from tqdm import tqdm,trange
 
 import warnings
 warnings.filterwarnings("ignore")
@@ -48,13 +48,13 @@ DATASET_PATH='/home/shenhongyu/data/scan6'
 SAVE_FOLDER='sam_masks'
 os.makedirs(os.path.join(DATASET_PATH,SAVE_FOLDER),exist_ok=True)
 
-TEXT_PROMPT = "chair . table . sofa . box"
-BOX_TRESHOLD = 0.35
+TEXT_PROMPT = "chair . table . sofa . bench"
+BOX_TRESHOLD = 0.30
 TEXT_TRESHOLD = 0.25
 
 image_paths = glob_data(os.path.join(DATASET_PATH,"images","*_rgb.png"))
 print('Load {} images.'.format(len(image_paths)))
-for idx in tqdm(range(len(image_paths))):
+for idx in trange(len(image_paths)):
     image_source, image = load_image(image_paths[idx])
     
     boxes, logits, phrases = predict(
