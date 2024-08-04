@@ -202,9 +202,11 @@ def training_feature(dataset, opt, pipe, testing_iterations, saving_iterations, 
                 except Exception as e:
                     # raise e
                     network_gui.conn = None
+
     with torch.no_grad():
         result_path="output/scan6/id/"
         os.makedirs(result_path,exist_ok=True)
+        scene = Scene(dataset, gaussians,shuffle=False)
         viewpoint_stack = scene.getTrainCameras()
         for idx, viewpoint in enumerate(viewpoint_stack):
             render_pkg = render(viewpoint, gaussians, pipe, background, opt.include_feature)
