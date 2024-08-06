@@ -1,5 +1,6 @@
 
 import torch
+import torch.nn as nn
 from scene import Scene, GaussianModel,MLP
 import os
 
@@ -10,17 +11,21 @@ from arguments import ModelParams, PipelineParams, get_combined_args
 
 from utils.render_utils import save_img_f32, save_img_u8
 from utils.render_utils import generate_path, create_videos
+from tqdm import trange
 
 #import open3d as o3d
 import numpy as np
 import matplotlib.pyplot as plt
 
+import hdbscan
 
-def saveRGB(label,path,k=12):
+#{"chair_1": 32, "table_1": 38, "chair_2": 41, "table_2": 43, "sofa_1": 44, "sofa_2": 51, "sofa_3": 58, "sofa_4": 65, "table_3": 75, "chair_3": 80, "chair_4": 90, "chair_5": 93}
+
+def saveRGB(label,path,class_n=12):
     img=label.view(384,384,-1)
     img=img.argmax(dim=2, keepdim=True).expand(-1, -1, 3)
-    bg=(img==k)
-    id_vis=img*255/(k+1)
+    bg=(img==class_n)
+    id_vis=img*255/(class_n+1)
     id_vis[:,:,1]=(id_vis[:,:,1]*23)%256
     id_vis[:,:,2]=(id_vis[:,:,2]*13)%256
 
@@ -30,25 +35,39 @@ def saveRGB(label,path,k=12):
     
     plt.imsave(path,id_vis, cmap='viridis')
 
-
-def get_object_by_id(gaussian,idx,inverse=False):
-    ids=gaussian.get_ids
-    unique_values, inverse_indices = ids.unique(return_inverse=True)
-    value_indices = {value.item(): (inverse_indices == i).nonzero(as_tuple=True)[0] for i, value in enumerate(unique_values)}
-    if idx > len(value_indices):
-        raise ValueError("idx error!")
-    #for i in range(13):
-    #    print(len(value_indices[i])) 
+def get_obj_by_mask(gaussian,mask,inverse=False):
     if inverse:
-        mask = torch.ones(len(ids), dtype=torch.bool)
-        mask[value_indices[idx]] = False  
-    else:
-        mask=value_indices[idx]
+        mask=~mask
     gaus=gaussian.capture('Objects',mask)
     obj=GaussianModel(gaussian.max_sh_degree)
     obj.restore(gaus,mode='obj')
+    #print("get {} gaussians".format(len(obj._opacity)))
     return obj
-    
+
+def get_object_by_id(gaussian,idx,inverse=False):
+    ids=gaussian.get_ids
+    mask=(ids==idx)
+    return get_obj_by_mask(gaussian,mask,inverse)
+
+def get_object_by_feature(gaussian,querys,inverse=False,threshold_sim=1e-5,threshold_dist=0.7):
+    features=gaussian.get_instance_feature
+    pdist = nn.PairwiseDistance(p=2)
+    cos = nn.CosineSimilarity(dim=1, eps=1e-6) 
+    final_mask = torch.zeros(len(features), dtype=torch.bool,device='cuda')
+    for query in querys:
+        sims=cos(features,query)  
+        mask1 = (sims<threshold_sim)
+        dist=pdist(features[mask1],query)
+        mask2=(dist<threshold_dist)
+        #print(mask2.sum())
+        final_mask[mask1] = final_mask[mask1] | mask2
+        # if int(mask2.sum()/1000)==60:
+        #     final_mask[mask1] = mask2
+        #     np.save(os.path.join(f'table.npy'),query.cpu().numpy())
+        #     break
+
+    return get_obj_by_mask(gaussian,final_mask,inverse)
+
 
 if __name__ == "__main__":
     # Set up command line argument parser
@@ -66,7 +85,7 @@ if __name__ == "__main__":
     gaussians = GaussianModel(dataset.sh_degree)
     scene = Scene(dataset, gaussians,shuffle=False)
 
-    k=12#TODO
+    class_n=12#TODO
     classifier=torch.load(args.classifier_checkpoint)
 
     checkpoint=args.start_checkpoint
@@ -80,7 +99,7 @@ if __name__ == "__main__":
     #chpt
     bg_color = [1,1,1] if dataset.white_background else [0, 0, 0]
     background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
-    
+    viewpoints = scene.getTrainCameras()
     train_dir = os.path.join(args.model_path, 'train', "ours_{}".format(scene.loaded_iter))
 
     render_objects=False
@@ -101,7 +120,7 @@ if __name__ == "__main__":
                 #print(img.shape)
                 save_img_u8(img.permute(1,2,0).cpu().detach().numpy(),os.path.join(path,str(idx)+".png"))
 
-    render_id_map=True
+    render_id_map=False
     if render_id_map:
         obj_id=12
         inverse=False
@@ -116,10 +135,77 @@ if __name__ == "__main__":
             for idx, viewpoint in enumerate(viewpoint_stack):
                 render_pkg = render(viewpoint, object, pipe, background,True)
                 instance_image=render_pkg["instance_image"]
-                label=classifier(instance_image.permute(1, 2, 0)).view(-1,k+1)
+                label=classifier(instance_image.permute(1, 2, 0)).view(-1,class_n+1)
                 save_path=os.path.join(path,f'id{idx:05d}.png')
                 saveRGB(label,save_path)
 
+    render_objects_feature=False
+    if render_objects_feature:
+        obj_id=4
+        n_sample=100
+        
+        inverse=False
+        vis_path="output/scan6/objects_f/"
+        path=os.path.join(vis_path,str(obj_id))
+        os.makedirs(path,exist_ok=True)
+        with torch.no_grad():
+            view = viewpoints[99]
+            render_pkg = render(view, gaussians, pipe, background,True)
+            instance_image=render_pkg["instance_image"]
+            instance_image=instance_image.permute(1, 2, 0)
+            img=render_pkg["render"]
+            save_img_u8(img.permute(1,2,0).cpu().detach().numpy(),os.path.join(path,"view.jpg"))
+            label=classifier(instance_image)
+            id_img=label.argmax(dim=2, keepdim=True)
+
+
+            mask=(id_img == obj_id).squeeze(-1)
+            obj_features=instance_image[mask].view(-1,16)
+
+            if n_sample> len(obj_features):
+                 raise ValueError('n_sample should smaller than {}'.format(len(obj_features)))
+            indices = torch.randint(0, obj_features.size(0), (n_sample,)).cuda()
+            query=torch.index_select(obj_features, 0, indices)#.mean().unsqueeze(0)
+
+            object=get_object_by_feature(gaussians,query,inverse,threshold_sim=1e-8,threshold_dist=1)
+            for idx, viewpoint in enumerate(viewpoints):
+                render_pkg = render(viewpoint, object, pipe, background,True)
+                img=render_pkg["render"]
+                save_img_u8(img.permute(1,2,0).cpu().detach().numpy(),os.path.join(path,"RGB_"+str(idx)+".png"))
+                instance_image=render_pkg["instance_image"]
+                label=classifier(instance_image.permute(1, 2, 0)).view(-1,class_n+1)
+                save_path=os.path.join(path,f'id{idx:05d}.png')
+                saveRGB(label,save_path)
+    
+    cluster=True
+    with torch.no_grad():
+        if cluster:
+            clusterer = hdbscan.HDBSCAN(metric='euclidean',min_cluster_size=3000,core_dist_n_jobs=12)
+            cluster_save_path='cluster_labels.npy'
+            if(os.path.exists(cluster_save_path)):
+                labels=np.load(cluster_save_path)
+            else:
+                #clusterer = hdbscan.HDBSCAN(metric='cosine',min_cluster_size=4000)
+                labels = clusterer.fit_predict(gaussians.get_instance_feature.cpu())
+                np.save('cluster_labels.npy',labels)
+            vis_path="output/scan6/objects_s2/"
+            for obj_id in trange(np.max(labels)):
+                path=os.path.join(vis_path,str(obj_id))
+                os.makedirs(path,exist_ok=True)
+                mask=(labels==obj_id)
+                object=get_obj_by_mask(gaussians,mask)
+
+                for idx, viewpoint in enumerate(viewpoints):
+                    render_pkg = render(viewpoint, object, pipe, background,True)
+                    instance_image=render_pkg["instance_image"]
+                    img=render_pkg["render"]
+                    label=classifier(instance_image.permute(1, 2, 0)).view(-1,class_n+1)
+                    if img.sum() < 200:
+                        continue      
+                    save_img_u8(img.permute(1,2,0).cpu().detach().numpy(),os.path.join(path,"RGB_"+str(idx)+".png"))
+                    save_path=os.path.join(path,f'id{idx:05d}.png')
+                    saveRGB(label,save_path)
+            
 
 
 
