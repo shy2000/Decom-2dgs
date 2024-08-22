@@ -3,6 +3,7 @@ import torch
 import torch.nn as nn
 from scene import Scene, GaussianModel,MLP
 import os
+import joblib
 
 from gaussian_renderer import render
 
@@ -20,6 +21,20 @@ import matplotlib.pyplot as plt
 import hdbscan
 
 #{"chair_1": 32, "table_1": 38, "chair_2": 41, "table_2": 43, "sofa_1": 44, "sofa_2": 51, "sofa_3": 58, "sofa_4": 65, "table_3": 75, "chair_3": 80, "chair_4": 90, "chair_5": 93}
+
+def obj_cluster(features,output_save_path,cluster_save_path):
+    if os.path.exists(output_save_path):
+        labels=np.load(cluster_save_path)
+        return labels
+    if os.path.exists(cluster_save_path):
+        clusterer = joblib.load(cluster_save_path)
+    else:
+        clusterer = hdbscan.HDBSCAN(metric='euclidean',min_cluster_size=3000,core_dist_n_jobs=-1)
+        joblib.dump(clusterer, cluster_save_path)
+    
+    labels = clusterer.fit_predict(features)
+    np.save('cluster_labels.npy',labels)
+    return labels
 
 def saveRGB(label,path,class_n=12):
     img=label.view(384,384,-1)
@@ -75,7 +90,7 @@ if __name__ == "__main__":
     model = ModelParams(parser, sentinel=True)
     pipeline = PipelineParams(parser)
     parser.add_argument("--iteration", default=-1, type=int)
-    parser.add_argument("--start_checkpoint", type=str, default = "output/scan6/chkpnt_with_feature2000.pth")
+    parser.add_argument("--start_checkpoint", type=str, default = "output/chkpnt/replica/scan6/chkpnt_contrastive_30000.pth")
     parser.add_argument("--classifier_checkpoint", type=str, default = "output/scan6/classifier_chkpnt2000.pth")
     args = get_combined_args(parser)
     print("Rendering " + args.model_path)
@@ -177,21 +192,16 @@ if __name__ == "__main__":
                 save_path=os.path.join(path,f'id{idx:05d}.png')
                 saveRGB(label,save_path)
     
-    cluster=True
-    with torch.no_grad():
+    cluster=False
+    with torch.no_grad():#with classifier
         if cluster:
-            clusterer = hdbscan.HDBSCAN(metric='euclidean',min_cluster_size=3000,core_dist_n_jobs=12)
-            cluster_save_path='cluster_labels.npy'
-            if(os.path.exists(cluster_save_path)):
-                labels=np.load(cluster_save_path)
-            else:
-                #clusterer = hdbscan.HDBSCAN(metric='cosine',min_cluster_size=4000)
-                labels = clusterer.fit_predict(gaussians.get_instance_feature.cpu())
-                np.save('cluster_labels.npy',labels)
+            output_save_path='cluster_labels_1.npy'
+            cluster_save_path='hdbscan_model_1.pkl'
+            labels=obj_cluster(gaussians.get_instance_feature.cpu(),output_save_path,cluster_save_path)
+
             vis_path="output/scan6/objects_s2/"
             for obj_id in trange(np.max(labels)):
                 path=os.path.join(vis_path,str(obj_id))
-                os.makedirs(path,exist_ok=True)
                 mask=(labels==obj_id)
                 object=get_obj_by_mask(gaussians,mask)
 
@@ -200,12 +210,36 @@ if __name__ == "__main__":
                     instance_image=render_pkg["instance_image"]
                     img=render_pkg["render"]
                     label=classifier(instance_image.permute(1, 2, 0)).view(-1,class_n+1)
-                    if img.sum() < 200:
+                    id_img=label.argmax(dim=-1, keepdim=True)
+                    bg=(id_img==class_n)
+                    bg=~bg
+                    if img.sum() < 200 or bg.sum() < 50:
                         continue      
+                    os.makedirs(path,exist_ok=True)
                     save_img_u8(img.permute(1,2,0).cpu().detach().numpy(),os.path.join(path,"RGB_"+str(idx)+".png"))
                     save_path=os.path.join(path,f'id{idx:05d}.png')
                     saveRGB(label,save_path)
-            
+    
+    contrastive=True
+    with torch.no_grad():
+        if contrastive:
+            output_save_path='cluster_labels_2.npy'
+            cluster_save_path='hdbscan_model_2.pkl'
+            labels=obj_cluster(gaussians.get_instance_feature.cpu(),output_save_path,cluster_save_path)
+            clusterer = joblib.load(cluster_save_path)
+            vis_path="output/scan6/objects_con/"
+            for idx, viewpoint in enumerate(viewpoints):
+                render_pkg = render(viewpoint, object, pipe, background,True)
+                instance_image=render_pkg["instance_image"]
+                img=render_pkg["render"]
+                label=cluster.predict(instance_image)
+                id_img=label.argmax(dim=-1, keepdim=True)
+                os.makedirs(path,exist_ok=True)
+                save_img_u8(img.permute(1,2,0).cpu().detach().numpy(),os.path.join(path,"RGB_"+str(idx)+".png"))
+                save_path=os.path.join(path,f'id{idx:05d}.png')
+                saveRGB(label,save_path)
+
+
 
 
 

@@ -13,7 +13,7 @@ import os
 import torch
 import torch.nn as nn
 from random import randint
-from utils.loss_utils import l1_loss, ssim, l2_loss,mask_mse,mask_cross_entropy
+from utils.loss_utils import l1_loss, ssim, l2_loss,mask_mse,mask_cross_entropy,contrastive_loss
 from gaussian_renderer import render, network_gui
 import sys
 from scene import Scene, GaussianModel, MLP
@@ -46,17 +46,17 @@ def training_feature(dataset, opt, pipe, testing_iterations, saving_iterations, 
     with open(os.path.join(dataset.source_path,'images','instance_id.json'), 'r') as file:
         data = json.load(file)
     k=len(data)
-    id_convert=torch.zeros(256,dtype=torch.int)
+    id_convert=torch.zeros(256,dtype=torch.int)#color to instance id
     for idx,i in enumerate(data.values()):
         id_convert[i]=idx
     id_convert[255]=k
     id_convert=id_convert.cuda()
 
-    print(opt.include_feature)
+
+
     if opt.include_feature:
-        print("include")
         if not checkpoint:
-            raise ValueError("checkpoint missing!")#lang
+            raise ValueError("checkpoint missing!")
     if checkpoint:
         (model_params, first_iter) = torch.load(checkpoint)
         first_iter = 0
@@ -76,7 +76,7 @@ def training_feature(dataset, opt, pipe, testing_iterations, saving_iterations, 
 
     progress_bar = tqdm(range(first_iter, opt.iterations), desc="Training progress")
     first_iter += 1
-    classifier=MLP(16,64,k+1).cuda()
+    classifier=MLP(3,64,k+1).cuda()
     class_optimizer=torch.optim.Adam(classifier.parameters(), lr=0.001)
 
     for iteration in range(first_iter, opt.iterations + 1):   
@@ -94,21 +94,38 @@ def training_feature(dataset, opt, pipe, testing_iterations, saving_iterations, 
             viewpoint_stack = scene.getTrainCameras().copy()
 
         viewpoint_cam = viewpoint_stack.pop(randint(0, len(viewpoint_stack)-1))
-        render_fea=True
-        if render_fea :
-            render_pkg = render(viewpoint_cam, gaussians, pipe, background, opt.include_feature)
-            instance_image = render_pkg["instance_image"]
-            gt_image = viewpoint_cam.original_instance_image.cuda()
-            #bg_mask=(gt_image[0,:] != 1.0)
-            #bg=(gt_image[0,:] == 1.0)
-            gt_label=gt_image[0,:]*255
-            gt_label=id_convert[gt_label.int()].to(torch.int64).view(-1)
-            #one_hot=torch.nn.functional.one_hot(gt_label,num_classes=k+1)
-            label=classifier(instance_image.permute(1, 2, 0)).view(-1,k+1)
-        else:
-            pass
+        
+        render_pkg = render(viewpoint_cam, gaussians, pipe, background, opt.include_feature)
+        instance_image = render_pkg["instance_image"]
 
-        main_loss=torch.nn.functional.cross_entropy(label, gt_label)
+        if opt.contrastive: 
+            instance_features=instance_image.permute(1, 2, 0).view(-1,16)
+            temperature=100.0
+            sample_num = opt.sample_num
+            sam_mask=viewpoint_cam.sam_mask
+            sam_mask=torch.from_numpy(sam_mask).view(-1).cuda()
+            if len(sam_mask)!=len(instance_features):
+                raise ValueError("mask size no match! {} {}".format(len(sam_mask),len(instance_features)))
+            instance_features=instance_features[sam_mask!=0]
+            sam_mask=sam_mask[sam_mask!=0]
+            indices = torch.randperm(len(instance_features))[:sample_num].cuda()
+            features=instance_features[indices]
+            instance_labels=sam_mask[indices]
+            main_loss=contrastive_loss(features,instance_labels,temperature)
+      
+        else:
+            render_fea=True
+            if render_fea :
+                gt_image = viewpoint_cam.original_instance_image.cuda()
+                #bg_mask=(gt_image[0,:] != 1.0)
+                #bg=~bg_mask
+                gt_label=gt_image[0,:]*255
+                gt_label=id_convert[gt_label.int()].to(torch.int64).view(-1)
+                #one_hot=torch.nn.functional.one_hot(gt_label,num_classes=k+1)
+                label=classifier(instance_image.permute(1, 2, 0)).view(-1,k+1)
+            else:
+                pass#Render by id
+            main_loss=torch.nn.functional.cross_entropy(label, gt_label)
         loss = main_loss 
         total_loss = loss 
         
@@ -186,25 +203,30 @@ def training_feature(dataset, opt, pipe, testing_iterations, saving_iterations, 
                 except Exception as e:
                     # raise e
                     network_gui.conn = None
-
+    
     with torch.no_grad():
-        result_path="output/scan6/id/"
-        os.makedirs(result_path,exist_ok=True)
-        scene = Scene(dataset, gaussians,shuffle=False)
-        viewpoint_stack = scene.getTrainCameras()
-        for idx, viewpoint in enumerate(viewpoint_stack):
-            render_pkg = render(viewpoint, gaussians, pipe, background, opt.include_feature)
-            instance_image=render_pkg["instance_image"]
-            label=classifier(instance_image.permute(1, 2, 0))
-            path=os.path.join(result_path,f'id{idx:05d}.png')
-            saveRGB(label,path)
-        features=gaussians.get_instance_feature
-        ids = classifier(features)
-        ids = ids.argmax(dim=1, keepdim=True)
-        gaussians.set_ids(ids.to(torch.int16))
-        print("\n[ITER {}] Saving Checkpoint".format(iteration))
-        torch.save((gaussians.capture('Features'), iteration), scene.model_path + "/chkpnt_with_feature" + str(iteration) + ".pth")
-        torch.save(classifier, scene.model_path +"/classifier_chkpnt"+str(iteration)+'.pth')
+        if opt.contrastive:
+            save_path=scene.model_path + "/chkpnt_contrastive_" + str(iteration) + ".pth"
+            torch.save((gaussians.capture('Features'), iteration),save_path)
+            print("\n[ITER {}] Saving Checkpoint".format(iteration))
+        elif render_fea: 
+            result_path="output/scan6/id_8/"
+            os.makedirs(result_path,exist_ok=True)
+            scene = Scene(dataset, gaussians,shuffle=False)
+            viewpoint_stack = scene.getTrainCameras()
+            for idx, viewpoint in enumerate(viewpoint_stack):
+                render_pkg = render(viewpoint, gaussians, pipe, background, opt.include_feature)
+                instance_image=render_pkg["instance_image"]
+                label=classifier(instance_image.permute(1, 2, 0))
+                path=os.path.join(result_path,f'id{idx:05d}.png')
+                saveRGB(label,path)
+            features=gaussians.get_instance_feature
+            ids = classifier(features)
+            ids = ids.argmax(dim=1, keepdim=True)
+            gaussians.set_ids(ids.to(torch.int16))
+            #print("\n[ITER {}] Saving Checkpoint".format(iteration))
+            #torch.save((gaussians.capture('Features'), iteration), scene.model_path + "/chkpnt_with_feature" + str(iteration) + ".pth")
+            #torch.save(classifier, scene.model_path +"/classifier_chkpnt"+str(iteration)+'.pth')
 
 
 def saveRGB(label,path,k=12):
@@ -221,148 +243,6 @@ def saveRGB(label,path,k=12):
     
     plt.imsave(path,id_vis, cmap='viridis')
 
-def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoint_iterations, checkpoint):
-    first_iter = 0
-    tb_writer = prepare_output_and_logger(dataset)
-    gaussians = GaussianModel(dataset.sh_degree)
-    scene = Scene(dataset, gaussians)
-    gaussians.training_setup(opt)
-    
-    if checkpoint:
-        (model_params, first_iter) = torch.load(checkpoint)
-        gaussians.restore(model_params, opt)
-
-    bg_color = [1, 1, 1] if dataset.white_background else [0, 0, 0]
-    background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
-
-    iter_start = torch.cuda.Event(enable_timing = True)
-    iter_end = torch.cuda.Event(enable_timing = True)
-
-    viewpoint_stack = None
-    ema_loss_for_log = 0.0
-    ema_dist_for_log = 0.0
-    ema_normal_for_log = 0.0
-
-    progress_bar = tqdm(range(first_iter, opt.iterations), desc="Training progress")
-    first_iter += 1
-    for iteration in range(first_iter, opt.iterations + 1):        
-
-        iter_start.record()
-
-        gaussians.update_learning_rate(iteration)
-
-        # Every 1000 its we increase the levels of SH up to a maximum degree
-        if iteration % 1000 == 0:
-            gaussians.oneupSHdegree()
-
-        # Pick a random Camera
-        if not viewpoint_stack:
-            viewpoint_stack = scene.getTrainCameras().copy()
-        viewpoint_cam = viewpoint_stack.pop(randint(0, len(viewpoint_stack)-1))   
-
-        render_pkg = render(viewpoint_cam, gaussians, pipe, background,opt)
-        image, viewspace_point_tensor, visibility_filter, radii = render_pkg["render"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"]
-        
-        gt_image = viewpoint_cam.original_image.cuda()
-        Ll1 = l1_loss(image, gt_image)
-        loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (1.0 - ssim(image, gt_image))
-        
-        # regularization
-        lambda_normal = opt.lambda_normal if iteration > 7000 else 0.0
-        lambda_dist = opt.lambda_dist if iteration > 3000 else 0.0
-
-        rend_dist = render_pkg["rend_dist"]
-        rend_normal  = render_pkg['rend_normal']
-        surf_normal = render_pkg['surf_normal']
-        normal_error = (1 - (rend_normal * surf_normal).sum(dim=0))[None]
-        normal_loss = lambda_normal * (normal_error).mean()
-        dist_loss = lambda_dist * (rend_dist).mean()
-
-        #Render
-        #if (iteration - 1) == debug_from:
-        
-        #    pipe.debug = True
-        # loss
-        total_loss = loss + dist_loss + normal_loss
-        
-        total_loss.backward()
-
-        iter_end.record()
-
-        with torch.no_grad():
-            # Progress bar
-            ema_loss_for_log = 0.4 * loss.item() + 0.6 * ema_loss_for_log
-            ema_dist_for_log = 0.4 * dist_loss.item() + 0.6 * ema_dist_for_log
-            ema_normal_for_log = 0.4 * normal_loss.item() + 0.6 * ema_normal_for_log
-
-
-            if iteration % 10 == 0:
-                loss_dict = {
-                    "Loss": f"{ema_loss_for_log:.{5}f}",
-                    "distort": f"{ema_dist_for_log:.{5}f}",
-                    "normal": f"{ema_normal_for_log:.{5}f}",
-                    "Points": f"{len(gaussians.get_xyz)}"
-                }
-                progress_bar.set_postfix(loss_dict)
-
-                progress_bar.update(10)
-            if iteration == opt.iterations:
-                progress_bar.close()
-
-            # Log and save
-            if tb_writer is not None:
-                tb_writer.add_scalar('train_loss_patches/dist_loss', ema_dist_for_log, iteration)
-                tb_writer.add_scalar('train_loss_patches/normal_loss', ema_normal_for_log, iteration)
-
-            training_report(tb_writer, iteration, Ll1, loss, l1_loss, iter_start.elapsed_time(iter_end), testing_iterations, scene, render, (pipe, background))
-            if (iteration in saving_iterations):
-                print("\n[ITER {}] Saving Gaussians".format(iteration))
-                scene.save(iteration)
-
-            # Densification
-            if iteration < opt.densify_until_iter:
-                gaussians.max_radii2D[visibility_filter] = torch.max(gaussians.max_radii2D[visibility_filter], radii[visibility_filter])
-                gaussians.add_densification_stats(viewspace_point_tensor, visibility_filter)
-
-                if iteration > opt.densify_from_iter and iteration % opt.densification_interval == 0:
-                    size_threshold = 20 if iteration > opt.opacity_reset_interval else None
-                    gaussians.densify_and_prune(opt.densify_grad_threshold, opt.opacity_cull, scene.cameras_extent, size_threshold)
-                
-                if iteration % opt.opacity_reset_interval == 0 or (dataset.white_background and iteration == opt.densify_from_iter):
-                    gaussians.reset_opacity()
-
-            # Optimizer step
-            if iteration < opt.iterations:
-                gaussians.optimizer.step()
-                gaussians.optimizer.zero_grad(set_to_none = True)
-
-            if (iteration in checkpoint_iterations):
-                print("\n[ITER {}] Saving Checkpoint".format(iteration))
-                torch.save((gaussians.capture(), iteration), scene.model_path + "/chkpnt" + str(iteration) + ".pth")
-
-        with torch.no_grad():        
-            if network_gui.conn == None:
-                network_gui.try_connect(dataset.render_items)
-            while network_gui.conn != None:
-                try:
-                    net_image_bytes = None
-                    custom_cam, do_training, keep_alive, scaling_modifer, render_mode = network_gui.receive()
-                    if custom_cam != None:
-                        render_pkg = render(custom_cam, gaussians, pipe, background, scaling_modifer,opt=opt)   
-                        net_image = render_net_image(render_pkg, dataset.render_items, render_mode, custom_cam)
-                        net_image_bytes = memoryview((torch.clamp(net_image, min=0, max=1.0) * 255).byte().permute(1, 2, 0).contiguous().cpu().numpy())
-                    metrics_dict = {
-                        "#": gaussians.get_opacity.shape[0],
-                        "loss": ema_loss_for_log
-                        # Add more metrics as needed
-                    }
-                    # Send the data
-                    network_gui.send(net_image_bytes, dataset.source_path, metrics_dict)
-                    if do_training and ((iteration < int(opt.iterations)) or not keep_alive):
-                        break
-                except Exception as e:
-                    # raise e
-                    network_gui.conn = None
 
 
 

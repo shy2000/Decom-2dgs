@@ -35,6 +35,29 @@ def mask_cross_entropy(network_output, gt, mask=None):
     loss = loss.sum() / mask.sum()
     return loss
 
+#Copyright Contrastive-Lift (NeurIPS 2023 Spotlight)
+#https://github.com/yashbhalgat/Contrastive-Lift
+def contrastive_loss(features, instance_labels, temperature):
+    bsize = features.size(0)
+    masks = instance_labels.view(-1, 1).repeat(1, bsize).eq_(instance_labels.clone())
+    masks = masks.fill_diagonal_(0, wrap=False)
+
+    # compute similarity matrix based on Euclidean distance
+    distance_sq = torch.pow(features.unsqueeze(1) - features.unsqueeze(0), 2).sum(dim=-1)
+    # temperature = 1 for positive pairs and temperature for negative pairs
+    temperature = torch.ones_like(distance_sq) * temperature
+    temperature = torch.where(masks==1, temperature, torch.ones_like(temperature))
+
+    similarity_kernel = torch.exp(-distance_sq/temperature)
+    logits = torch.exp(similarity_kernel)
+
+    p = torch.mul(logits, masks).sum(dim=-1)
+    Z = logits.sum(dim=-1)
+
+    prob = torch.div(p, Z)
+    prob_masked = torch.masked_select(prob, prob.ne(0))
+    loss = -prob_masked.log().sum()/bsize
+    return loss
 
 def mask_mse1(network_output, gt, mask=None):
     mask=mask.float()

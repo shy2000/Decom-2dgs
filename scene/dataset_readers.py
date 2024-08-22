@@ -22,7 +22,7 @@ from pathlib import Path
 from plyfile import PlyData, PlyElement
 from utils.sh_utils import SH2RGB
 from scene.gaussian_model import BasicPointCloud
-
+import torch
 from glob import glob
 import cv2
 
@@ -34,6 +34,7 @@ class CameraInfo(NamedTuple):
     FovX: np.array
     image: np.array
     instance_image:np.array
+    sam_mask:np.array
     image_path: str
     image_name: str
     width: int
@@ -121,7 +122,7 @@ def readCameras(scale_mats, world_mats, image_paths,instance_paths):
     sys.stdout.write('\n')
     return cam_infos
 
-def readCamerasFromKeyFrameTraj(path, trajfile,read_instance=True,per_frame=20):
+def readCamerasFromKeyFrameTraj(path, trajfile,read_sam_mask=True,read_instance=True,per_frame=20):
     scale = 384 / 680
     offset = (384 - 680 ) * 0.5
     inv_metrix = np.eye(4)
@@ -135,9 +136,12 @@ def readCamerasFromKeyFrameTraj(path, trajfile,read_instance=True,per_frame=20):
         return data_paths
     image_paths = glob_data(os.path.join('{0}'.format(path),"images","*_rgb.png"))
     instance_paths=None
+    sam_paths=None
     if read_instance:
         instance_paths = glob_data(os.path.join('{0}'.format(path),"images","instance_mask", "*.png"))
-    
+    if read_sam_mask:
+        sam_paths = glob_data(os.path.join('{0}'.format(path),"sam_masks", "*.npy"))
+
     with open(os.path.join(path, trajfile)) as txt_file:
         lines = txt_file.readlines()
 
@@ -181,10 +185,19 @@ def readCamerasFromKeyFrameTraj(path, trajfile,read_instance=True,per_frame=20):
             instance_image=Image.open(instance_path)
         else:
             instance_image=None
+
+        if sam_paths:
+            sam_path=sam_paths[idx]
+            sam_mask=np.load(sam_path)
+
+        else:
+            sam_mask=None
+        
         cam_infos.append(CameraInfo(uid=idx, R=R_w_c, T=T_c_w, FovY=FovY, FovX=FovX, image=rgb,
                                     image_path=rgb_name, image_name=image_name, width=rgb.size[0],
                                     height=rgb.size[1],
-                                    instance_image=instance_image))
+                                    instance_image=instance_image,
+                                    sam_mask=sam_mask))
         idx+=1
     sys.stdout.write('\n')
 

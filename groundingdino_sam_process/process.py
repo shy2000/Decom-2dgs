@@ -19,7 +19,7 @@ def show_masks(mask,image):
     mask =Image.fromarray((mask.numpy()*255).astype(np.uint8)).convert("RGBA")
     return Image.alpha_composite(image,mask)
 
-def save_masks(masks):
+def visual_masks(masks):
     h, w = masks.shape[-2:]
     masks=masks.cpu()
     total_mask= torch.zeros((h, w, 4))
@@ -48,7 +48,7 @@ DATASET_PATH='/home/shenhongyu/data/scan6'
 SAVE_FOLDER='sam_masks'
 os.makedirs(os.path.join(DATASET_PATH,SAVE_FOLDER),exist_ok=True)
 
-TEXT_PROMPT = "chair . table . sofa . bench"
+TEXT_PROMPT = "chair . table . sofa . bench . pillow"
 BOX_TRESHOLD = 0.30
 TEXT_TRESHOLD = 0.25
 
@@ -81,9 +81,18 @@ for idx in trange(len(image_paths)):
                 boxes = transformed_boxes,
                 multimask_output = False,
             )
-    np.save(os.path.join(DATASET_PATH,SAVE_FOLDER,f'{idx:05d}_masks.npy'),masks.cpu().numpy())
-    visual_mask = save_masks(masks)
+    visual_mask = visual_masks(masks)
     plt.imsave(os.path.join(DATASET_PATH,SAVE_FOLDER,f'{idx:05d}_masks.png'),np.clip(visual_mask.numpy(),0,1))
+    
+    h, w = masks.shape[-2:]
+
+    total_mask= torch.zeros((h, w)).to(DEVICE)
+    masks=masks.to(torch.int)
+    for i, mask in enumerate(masks):
+        total_mask = total_mask + mask.squeeze()*i + 20 #to prevent conflict 
+
+    np.save(os.path.join(DATASET_PATH,SAVE_FOLDER,f'{idx:05d}_masks.npy'),total_mask.cpu().numpy())
+
 print('Done!')
 print(' Save {} sam masks at {}.'.format(len(image_paths),os.path.join(DATASET_PATH,SAVE_FOLDER)))
     
