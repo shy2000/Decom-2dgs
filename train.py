@@ -162,9 +162,10 @@ def training_feature(dataset, opt, pipe, testing_iterations, saving_iterations, 
                 tb_writer.add_scalar('train_loss_patches/normal_loss', ema_normal_for_log, iteration)
 
             training_report(tb_writer, iteration, main_loss, loss, l1_loss, iter_start.elapsed_time(iter_end), testing_iterations, scene, render, (pipe, background,opt.include_feature))
-            #if (iteration in saving_iterations):
-            #    print("\n[ITER {}] Saving Gaussians".format(iteration))
-            #    scene.save(iteration)
+            if (iteration in saving_iterations):
+                save_path=scene.model_path + "/chkpnt_contrastive_" + str(iteration) + ".pth"
+                torch.save((gaussians.capture('Features'), iteration),save_path)
+                print("\n[ITER {}] Saving Checkpoint".format(iteration))
                 
 
 
@@ -206,9 +207,7 @@ def training_feature(dataset, opt, pipe, testing_iterations, saving_iterations, 
     
     with torch.no_grad():
         if opt.contrastive:
-            save_path=scene.model_path + "/chkpnt_contrastive_" + str(iteration) + ".pth"
-            torch.save((gaussians.capture('Features'), iteration),save_path)
-            print("\n[ITER {}] Saving Checkpoint".format(iteration))
+            pass
         elif render_fea: 
             result_path="output/scan6/id_8/"
             os.makedirs(result_path,exist_ok=True)

@@ -232,19 +232,24 @@ if __name__ == "__main__":
             output_save_path='cluster_labels_2.npy'
             cluster_save_path='hdbscan_model_2.pkl'
             all_labels=obj_cluster(gaussians.get_instance_feature.cpu(),output_save_path,cluster_save_path)
-            clusterer = joblib.load(cluster_save_path)
-            print(clusterer.labels_)
+            #clusterer = joblib.load(cluster_save_path)
+            # clusterer.generate_prediction_data()
+            # label,_ = hdbscan.approximate_predict(clusterer, instance_image.view(-1,16).cpu())
             vis_path="output/scan6/objects_con/"
-            for idx, viewpoint in enumerate(viewpoints):
-                render_pkg = render(viewpoint, gaussians, pipe, background,True)
-                instance_image=render_pkg["instance_image"]
-                img=render_pkg["render"]
-                clusterer.generate_prediction_data()
-                label,_ = hdbscan.approximate_predict(clusterer, instance_image.view(-1,16).cpu())
-                os.makedirs(path,exist_ok=True)
-                save_img_u8(img.permute(1,2,0).cpu().detach().numpy(),os.path.join(path,"RGB_"+str(idx)+".png"))
-                save_path=os.path.join(path,f'id{idx:05d}.png')
-                saveRGB(label,save_path)
+            for obj_id in trange(np.max(all_labels)):
+                path=os.path.join(vis_path,str(obj_id))
+                mask=(all_labels==obj_id)
+                object=get_obj_by_mask(gaussians,mask)
+                for idx, viewpoint in enumerate(viewpoints):
+                    render_pkg = render(viewpoint, object, pipe, background,True)
+                    img=render_pkg["render"]
+                    if mask.sum() < 200:
+                        continue      
+                    os.makedirs(path,exist_ok=True)
+                    save_img_u8(img.permute(1,2,0).cpu().detach().numpy(),os.path.join(path,"RGB_"+str(idx)+".png"))
+                    save_path=os.path.join(path,f'id{idx:05d}.png')
+                    #saveRGB(label,save_path,class_n=-1)
+
 
 
 
