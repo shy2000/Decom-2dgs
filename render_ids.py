@@ -24,22 +24,28 @@ import hdbscan
 
 def obj_cluster(features,output_save_path,cluster_save_path):
     if os.path.exists(output_save_path):
-        labels=np.load(cluster_save_path)
+        labels=np.load(output_save_path)
         return labels
     if os.path.exists(cluster_save_path):
         clusterer = joblib.load(cluster_save_path)
     else:
-        clusterer = hdbscan.HDBSCAN(metric='euclidean',min_cluster_size=3000,core_dist_n_jobs=-1)
+        clusterer = hdbscan.HDBSCAN(metric='euclidean',min_cluster_size=3000,core_dist_n_jobs=-1).fit(features)
         joblib.dump(clusterer, cluster_save_path)
-    
-    labels = clusterer.fit_predict(features)
-    np.save('cluster_labels.npy',labels)
+        print(clusterer.labels_)
+ 
+    labels=clusterer.labels_
+    np.save(output_save_path,labels)
     return labels
 
 def saveRGB(label,path,class_n=12):
     img=label.view(384,384,-1)
-    img=img.argmax(dim=2, keepdim=True).expand(-1, -1, 3)
-    bg=(img==class_n)
+    if class_n>0:
+        img=img.argmax(dim=2, keepdim=True).expand(-1, -1, 3)
+        bg=(img==class_n)
+    else:
+        img=img.expand(-1,-1,3)
+        bg=(img<0)
+
     id_vis=img*255/(class_n+1)
     id_vis[:,:,1]=(id_vis[:,:,1]*23)%256
     id_vis[:,:,2]=(id_vis[:,:,2]*13)%256
@@ -225,15 +231,16 @@ if __name__ == "__main__":
         if contrastive:
             output_save_path='cluster_labels_2.npy'
             cluster_save_path='hdbscan_model_2.pkl'
-            labels=obj_cluster(gaussians.get_instance_feature.cpu(),output_save_path,cluster_save_path)
+            all_labels=obj_cluster(gaussians.get_instance_feature.cpu(),output_save_path,cluster_save_path)
             clusterer = joblib.load(cluster_save_path)
+            print(clusterer.labels_)
             vis_path="output/scan6/objects_con/"
             for idx, viewpoint in enumerate(viewpoints):
-                render_pkg = render(viewpoint, object, pipe, background,True)
+                render_pkg = render(viewpoint, gaussians, pipe, background,True)
                 instance_image=render_pkg["instance_image"]
                 img=render_pkg["render"]
-                label=cluster.predict(instance_image)
-                id_img=label.argmax(dim=-1, keepdim=True)
+                clusterer.generate_prediction_data()
+                label,_ = hdbscan.approximate_predict(clusterer, instance_image.view(-1,16).cpu())
                 os.makedirs(path,exist_ok=True)
                 save_img_u8(img.permute(1,2,0).cpu().detach().numpy(),os.path.join(path,"RGB_"+str(idx)+".png"))
                 save_path=os.path.join(path,f'id{idx:05d}.png')
