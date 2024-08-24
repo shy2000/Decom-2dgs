@@ -89,7 +89,7 @@ for idx in trange(len(image_paths)):
     total_mask= torch.zeros((h, w)).to(DEVICE)
     masks=masks.to(torch.int)
     for i, mask in enumerate(masks):
-        total_mask = total_mask + mask.squeeze()*i + 20 #to prevent conflict 
+        total_mask = total_mask + mask.squeeze()*(i + 20) #to prevent conflict 
 
     np.save(os.path.join(DATASET_PATH,SAVE_FOLDER,f'{idx:05d}_masks.npy'),total_mask.cpu().numpy())
 

@@ -106,11 +106,12 @@ def training_feature(dataset, opt, pipe, testing_iterations, saving_iterations, 
             if len(sam_mask)!=len(instance_features):
                 raise ValueError("mask size no match! {} {}".format(len(sam_mask),len(instance_features)))
             
-            instance_features=instance_features[sam_mask!=0]
-            sam_mask=sam_mask[sam_mask!=0]
+            instance_features=instance_features[sam_mask>=20]
+            sam_mask=sam_mask[sam_mask>=20]
 
             sample_num = opt.sample_num
-            n_sample=int(len(sam_mask)/sample_num)+1
+            n_sample=min(int(len(sam_mask)/sample_num)+1,10)
+           # print(n_sample)
             main_loss=0
             for sample_i in range(n_sample):
                 indices = torch.randperm(len(instance_features))[sample_i*sample_num :(sample_i+1)*sample_num].cuda()
@@ -343,7 +344,7 @@ if __name__ == "__main__":
     parser.add_argument('--ip', type=str, default="127.0.0.1")
     parser.add_argument('--port', type=int, default=6009)
     parser.add_argument('--detect_anomaly', action='store_true', default=False)
-    parser.add_argument("--test_iterations", nargs="+", type=int, default=[7_000, 30_000])
+    parser.add_argument("--test_iterations", nargs="+", type=int, default=[30_000])
     parser.add_argument("--save_iterations", nargs="+", type=int, default=[7_000, 30_000])
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--checkpoint_iterations", nargs="+", type=int, default=[7000,30000])
