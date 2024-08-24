@@ -101,18 +101,23 @@ def training_feature(dataset, opt, pipe, testing_iterations, saving_iterations, 
         if opt.contrastive: 
             instance_features=instance_image.permute(1, 2, 0).view(-1,16)
             temperature=100.0
-            sample_num = opt.sample_num
             sam_mask=viewpoint_cam.sam_mask
             sam_mask=torch.from_numpy(sam_mask).view(-1).cuda()
             if len(sam_mask)!=len(instance_features):
                 raise ValueError("mask size no match! {} {}".format(len(sam_mask),len(instance_features)))
+            
             instance_features=instance_features[sam_mask!=0]
             sam_mask=sam_mask[sam_mask!=0]
-            indices = torch.randperm(len(instance_features))[:sample_num].cuda()
-            features=instance_features[indices]
-            instance_labels=sam_mask[indices]
-            main_loss=contrastive_loss(features,instance_labels,temperature)
-      
+
+            sample_num = opt.sample_num
+            n_sample=int(len(sam_mask)/sample_num)+1
+            main_loss=0
+            for sample_i in range(n_sample):
+                indices = torch.randperm(len(instance_features))[sample_i*sample_num :(sample_i+1)*sample_num].cuda()
+                features=instance_features[indices]
+                instance_labels=sam_mask[indices]
+                main_loss+=contrastive_loss(features,instance_labels,temperature)
+            main_loss/=n_sample
         else:
             render_fea=True
             if render_fea :
@@ -126,6 +131,7 @@ def training_feature(dataset, opt, pipe, testing_iterations, saving_iterations, 
             else:
                 pass#Render by id
             main_loss=torch.nn.functional.cross_entropy(label, gt_label)
+            
         loss = main_loss 
         total_loss = loss 
         
@@ -134,11 +140,11 @@ def training_feature(dataset, opt, pipe, testing_iterations, saving_iterations, 
         iter_end.record()
 
         if iteration%500==0:
-            continue
-            vis_path="output/vis/"
-            save_img_u8(gt_image.permute(1,2,0).cpu().detach().numpy(),os.path.join(vis_path,str(int(iteration/500))+'img'+".png"))
-            path=os.path.join(vis_path,str(int(iteration/500))+'id'+".png")
-            saveRGB(label,path)
+            pass
+            # vis_path="output/vis/"
+            # save_img_u8(gt_image.permute(1,2,0).cpu().detach().numpy(),os.path.join(vis_path,str(int(iteration/500))+'img'+".png"))
+            # path=os.path.join(vis_path,str(int(iteration/500))+'id'+".png")
+            # saveRGB(label,path)
 
 
         with torch.no_grad():
@@ -162,6 +168,7 @@ def training_feature(dataset, opt, pipe, testing_iterations, saving_iterations, 
                 tb_writer.add_scalar('train_loss_patches/normal_loss', ema_normal_for_log, iteration)
 
             training_report(tb_writer, iteration, main_loss, loss, l1_loss, iter_start.elapsed_time(iter_end), testing_iterations, scene, render, (pipe, background,opt.include_feature))
+
             if (iteration in saving_iterations):
                 save_path=scene.model_path + "/chkpnt_contrastive_" + str(iteration) + ".pth"
                 torch.save((gaussians.capture('Features'), iteration),save_path)
@@ -176,10 +183,10 @@ def training_feature(dataset, opt, pipe, testing_iterations, saving_iterations, 
                 class_optimizer.step()
                 class_optimizer.zero_grad(set_to_none = True)
 
-            if (iteration in checkpoint_iterations):
-                print("\n[ITER {}] Saving Checkpoint".format(iteration))
-                torch.save((gaussians.capture(), iteration), scene.model_path + "/chkpnt_with_feature" + str(iteration) + ".pth")
-                torch.save(classifier, scene.model_path +"/classifier_chkpnt"+str(iteration)+'.pth')
+            # if (iteration in checkpoint_iterations):
+            #     print("\n[ITER {}] Saving Checkpoint".format(iteration))
+            #     torch.save((gaussians.capture(), iteration), scene.model_path + "/chkpnt_with_feature" + str(iteration) + ".pth")
+            #     torch.save(classifier, scene.model_path +"/classifier_chkpnt"+str(iteration)+'.pth')
                 
         with torch.no_grad():        
             if network_gui.conn == None:
@@ -337,14 +344,13 @@ if __name__ == "__main__":
     parser.add_argument('--port', type=int, default=6009)
     parser.add_argument('--detect_anomaly', action='store_true', default=False)
     parser.add_argument("--test_iterations", nargs="+", type=int, default=[7_000, 30_000])
-    parser.add_argument("--save_iterations", nargs="+", type=int, default=[30_000])
+    parser.add_argument("--save_iterations", nargs="+", type=int, default=[7_000, 30_000])
     parser.add_argument("--quiet", action="store_true")
-    parser.add_argument("--checkpoint_iterations", nargs="+", type=int, default=[])
+    parser.add_argument("--checkpoint_iterations", nargs="+", type=int, default=[7000,30000])
     parser.add_argument("--start_checkpoint", type=str, default = None)
 
     args = parser.parse_args(sys.argv[1:])
     args.save_iterations.append(args.iterations)
-    
     print("Optimizing " + args.model_path)
 
     # Initialize system state (RNG)
