@@ -22,16 +22,15 @@ import hdbscan
 
 #{"chair_1": 32, "table_1": 38, "chair_2": 41, "table_2": 43, "sofa_1": 44, "sofa_2": 51, "sofa_3": 58, "sofa_4": 65, "table_3": 75, "chair_3": 80, "chair_4": 90, "chair_5": 93}
 
-def obj_cluster(features,output_save_path,cluster_save_path):
-    if os.path.exists(output_save_path):
+def obj_cluster(features,output_save_path,cluster_save_path,recluster):
+    if os.path.exists(output_save_path) and not recluster:
         labels=np.load(output_save_path)
         return labels
-    if os.path.exists(cluster_save_path):
+    if os.path.exists(cluster_save_path) and not recluster:
         clusterer = joblib.load(cluster_save_path)
     else:
         clusterer = hdbscan.HDBSCAN(metric='euclidean',min_cluster_size=3000,core_dist_n_jobs=-1).fit(features)
         joblib.dump(clusterer, cluster_save_path)
-        print(clusterer.labels_)
  
     labels=clusterer.labels_
     np.save(output_save_path,labels)
@@ -96,7 +95,7 @@ if __name__ == "__main__":
     model = ModelParams(parser, sentinel=True)
     pipeline = PipelineParams(parser)
     parser.add_argument("--iteration", default=-1, type=int)
-    parser.add_argument("--start_checkpoint", type=str, default = "output/chkpnt/replica/scan6/chkpnt_contrastive_30000.pth")
+    parser.add_argument("--start_checkpoint", type=str, default = "output/chkpnt/replica/scan6/chkpnt_contrastive_2000.pth")
     parser.add_argument("--classifier_checkpoint", type=str, default = "output/scan6/classifier_chkpnt2000.pth")
     args = get_combined_args(parser)
     print("Rendering " + args.model_path)
@@ -231,11 +230,13 @@ if __name__ == "__main__":
         if contrastive:
             output_save_path='cluster_labels_2.npy'
             cluster_save_path='hdbscan_model_2.pkl'
-            all_labels=obj_cluster(gaussians.get_instance_feature.cpu(),output_save_path,cluster_save_path)
+            recluster=1
+            all_labels=obj_cluster(gaussians.get_instance_feature.cpu(),output_save_path,cluster_save_path,recluster)
             #clusterer = joblib.load(cluster_save_path)
             # clusterer.generate_prediction_data()
             # label,_ = hdbscan.approximate_predict(clusterer, instance_image.view(-1,16).cpu())
             vis_path="output/scan6/objects_con/"
+            print(np.max(all_labels))
             for obj_id in trange(np.max(all_labels)):
                 path=os.path.join(vis_path,str(obj_id))
                 mask=(all_labels==obj_id)

@@ -98,7 +98,7 @@ class OptimizationParams(ParamGroup):
         self.include_feature=False
         self.instance_feature_lr=0.01
         self.contrastive=False
-        self.sample_num=2048
+        self.sample_num=1000
         super().__init__(parser, "Optimization Parameters")
 
 def get_combined_args(parser : ArgumentParser):

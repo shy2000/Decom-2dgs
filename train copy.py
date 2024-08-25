@@ -117,13 +117,36 @@ def training_feature(dataset, opt, pipe, testing_iterations, save_iterations, ch
                 indices = torch.randperm(len(instance_features))[sample_i*sample_num :(sample_i+1)*sample_num].cuda()
                 features=instance_features[indices]
                 instance_labels=sam_mask[indices]
-                con_loss=contrastive_loss(features,instance_labels,temperature)
-                main_loss+=con_loss
-        loss = main_loss / n_sample
+                main_loss=contrastive_loss(features,instance_labels,temperature)
+            main_loss/=n_sample*sample_num
+        else:
+            render_fea=True
+            if render_fea :
+                gt_image = viewpoint_cam.original_instance_image.cuda()
+                #bg_mask=(gt_image[0,:] != 1.0)
+                #bg=~bg_mask
+                gt_label=gt_image[0,:]*255
+                gt_label=id_convert[gt_label.int()].to(torch.int64).view(-1)
+                #one_hot=torch.nn.functional.one_hot(gt_label,num_classes=k+1)
+                label=classifier(instance_image.permute(1, 2, 0)).view(-1,k+1)
+            else:
+                pass#Render by id
+            main_loss=torch.nn.functional.cross_entropy(label, gt_label)
+            
+        loss = main_loss 
         total_loss = loss 
+        Loss.append(total_loss)
         total_loss.backward()
-        Loss.append(total_loss.item())
+
         iter_end.record()
+
+        if iteration%500==0:
+            pass
+            # vis_path="output/vis/"
+            # save_img_u8(gt_image.permute(1,2,0).cpu().detach().numpy(),os.path.join(vis_path,str(int(iteration/500))+'img'+".png"))
+            # path=os.path.join(vis_path,str(int(iteration/500))+'id'+".png")
+            # saveRGB(label,path)
+
 
         with torch.no_grad():
             # Progress bar
@@ -135,24 +158,103 @@ def training_feature(dataset, opt, pipe, testing_iterations, save_iterations, ch
                     "Points": f"{len(gaussians.get_xyz)}"
                 }
                 progress_bar.set_postfix(loss_dict)
-                progress_bar.update(10)
 
+                progress_bar.update(10)
             if iteration == opt.iterations:
                 progress_bar.close()
 
+            # Log and save
+            if tb_writer is not None:
+                tb_writer.add_scalar('train_loss_patches/dist_loss', ema_dist_for_log, iteration)
+                tb_writer.add_scalar('train_loss_patches/normal_loss', ema_normal_for_log, iteration)
+
             training_report(tb_writer, iteration, main_loss, loss, l1_loss, iter_start.elapsed_time(iter_end), testing_iterations, scene, render, (pipe, background,opt.include_feature))
-                
-            # Optimizer step
-            if iteration < opt.iterations:
-                gaussians.optimizer.step()
-                gaussians.optimizer.zero_grad(set_to_none = True)
-            
+
             if (iteration in save_iterations):
                 save_path=scene.model_path + "/chkpnt_contrastive_" + str(iteration) + ".pth"
                 torch.save((gaussians.capture('Features'), iteration),save_path)
                 print("\n[ITER {}] Saving Checkpoint".format(iteration))
                 torch.save(Loss,'loss'.format(iteration))  
-        
+                
+            
+
+
+            # Optimizer step
+            if iteration < opt.iterations:
+                gaussians.optimizer.step()
+                gaussians.optimizer.zero_grad(set_to_none = True)
+                #class_optimizer.step()
+                #class_optimizer.zero_grad(set_to_none = True)
+
+            # if (iteration in checkpoint_iterations):
+            #     print("\n[ITER {}] Saving Checkpoint".format(iteration))
+            #     torch.save((gaussians.capture(), iteration), scene.model_path + "/chkpnt_with_feature" + str(iteration) + ".pth")
+            #     torch.save(classifier, scene.model_path +"/classifier_chkpnt"+str(iteration)+'.pth')
+                
+        with torch.no_grad():        
+            if network_gui.conn == None:
+                network_gui.try_connect(dataset.render_items)
+            while network_gui.conn != None:
+                try:
+                    net_image_bytes = None
+                    custom_cam, do_training, keep_alive, scaling_modifer, render_mode = network_gui.receive()
+                    if custom_cam != None:
+                        render_pkg = render(custom_cam, gaussians, pipe, background, scaling_modifer,include_feature=opt.include_feature)   
+                        net_image = render_net_image(render_pkg, dataset.render_items, render_mode, custom_cam)
+                        net_image_bytes = memoryview((torch.clamp(net_image, min=0, max=1.0) * 255).byte().permute(1, 2, 0).contiguous().cpu().numpy())
+                    metrics_dict = {
+                        "#": gaussians.get_opacity.shape[0],
+                        "loss": ema_loss_for_log
+                        # Add more metrics as needed
+                    }
+                    # Send the data
+                    network_gui.send(net_image_bytes, dataset.source_path, metrics_dict)
+                    if do_training and ((iteration < int(opt.iterations)) or not keep_alive):
+                        break
+                except Exception as e:
+                    # raise e
+                    network_gui.conn = None
+    
+    with torch.no_grad():
+        if opt.contrastive:
+      
+            
+            pass
+        elif render_fea: 
+            result_path="output/scan6/id_8/"
+            os.makedirs(result_path,exist_ok=True)
+            scene = Scene(dataset, gaussians,shuffle=False)
+            viewpoint_stack = scene.getTrainCameras()
+            for idx, viewpoint in enumerate(viewpoint_stack):
+                render_pkg = render(viewpoint, gaussians, pipe, background, opt.include_feature)
+                instance_image=render_pkg["instance_image"]
+                label=classifier(instance_image.permute(1, 2, 0))
+                path=os.path.join(result_path,f'id{idx:05d}.png')
+                saveRGB(label,path)
+            features=gaussians.get_instance_feature
+            ids = classifier(features)
+            ids = ids.argmax(dim=1, keepdim=True)
+            gaussians.set_ids(ids.to(torch.int16))
+            #print("\n[ITER {}] Saving Checkpoint".format(iteration))
+            #torch.save((gaussians.capture('Features'), iteration), scene.model_path + "/chkpnt_with_feature" + str(iteration) + ".pth")
+            #torch.save(classifier, scene.model_path +"/classifier_chkpnt"+str(iteration)+'.pth')
+
+
+def saveRGB(label,path,k=12):
+    img=label.view(384,384,-1)
+    img=img.argmax(dim=2, keepdim=True).expand(-1, -1, 3)
+    bg=(img==k)
+    id_vis=img*255/(k+1)
+    id_vis[:,:,1]=(id_vis[:,:,1]*23)%256
+    id_vis[:,:,2]=(id_vis[:,:,2]*13)%256
+
+    id_vis=id_vis*(~bg).int()+bg.int()*255
+
+    id_vis=np.array(id_vis.cpu(),dtype=np.uint8)
+    
+    plt.imsave(path,id_vis, cmap='viridis')
+
+
 
 
 def prepare_output_and_logger(args):    
@@ -246,10 +348,10 @@ if __name__ == "__main__":
     parser.add_argument('--ip', type=str, default="127.0.0.1")
     parser.add_argument('--port', type=int, default=6009)
     parser.add_argument('--detect_anomaly', action='store_true', default=False)
-    parser.add_argument("--test_iterations", nargs="+", type=int, default=[])
-    parser.add_argument("--save_iterations", nargs="+", type=int, default=[10000,30_000])
+    parser.add_argument("--test_iterations", nargs="+", type=int, default=[30_000])
+    parser.add_argument("--save_iterations", nargs="+", type=int, default=[2000, 30_000])
     parser.add_argument("--quiet", action="store_true")
-    parser.add_argument("--checkpoint_iterations", nargs="+", type=int, default=[])
+    parser.add_argument("--checkpoint_iterations", nargs="+", type=int, default=[2000,30000])
     parser.add_argument("--start_checkpoint", type=str, default = None)
 
     args = parser.parse_args(sys.argv[1:])

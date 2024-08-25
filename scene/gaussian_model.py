@@ -259,7 +259,7 @@ class GaussianModel:
         if training_args.include_feature:
             if self._instance_feature is None or self._instance_feature.shape[0] != self._xyz.shape[0]:
                 # 开始feature训练的时候，往模型中加入instance feature参数
-                instance_feature = torch.zeros((self._xyz.shape[0], 16), device="cuda") #instance_feature dim=3
+                instance_feature = torch.randn((self._xyz.shape[0], 16), device="cuda") #instance_feature dim=3
                 self._instance_feature = nn.Parameter(instance_feature.requires_grad_(True))
                  
             l = [
