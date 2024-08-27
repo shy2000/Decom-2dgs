@@ -11,6 +11,7 @@
 
 import os
 import torch
+import time
 import torch.nn as nn
 from random import randint
 from utils.loss_utils import l1_loss, ssim, l2_loss,mask_mse,mask_cross_entropy,contrastive_loss
@@ -106,12 +107,16 @@ def training_feature(dataset, opt, pipe, testing_iterations, save_iterations, ch
             if len(sam_mask)!=len(instance_features):
                 raise ValueError("mask size no match! {} {}".format(len(sam_mask),len(instance_features)))
             
-            instance_features=instance_features[sam_mask>=20]
-            sam_mask=sam_mask[sam_mask>=20]
+            instance_features=instance_features[sam_mask>0]
+            sam_mask=sam_mask[sam_mask>0]
 
             sample_num = opt.sample_num
-            n_sample=min(int(len(sam_mask)/sample_num)+1,10)
-           # print(n_sample)
+            n_sample=min(int(len(sam_mask)/sample_num)+1,30)
+            indices = torch.randperm(len(instance_features))[ :sample_num].cuda()
+            # features=instance_features[indices]
+            # instance_labels=sam_mask[indices]
+            # main_loss=contrastive_loss(features,instance_labels,temperature)
+
             main_loss=0
             for sample_i in range(n_sample):
                 indices = torch.randperm(len(instance_features))[sample_i*sample_num :(sample_i+1)*sample_num].cuda()
@@ -119,6 +124,7 @@ def training_feature(dataset, opt, pipe, testing_iterations, save_iterations, ch
                 instance_labels=sam_mask[indices]
                 con_loss=contrastive_loss(features,instance_labels,temperature)
                 main_loss+=con_loss
+                
         loss = main_loss / n_sample
         total_loss = loss 
         total_loss.backward()
@@ -148,10 +154,11 @@ def training_feature(dataset, opt, pipe, testing_iterations, save_iterations, ch
                 gaussians.optimizer.zero_grad(set_to_none = True)
             
             if (iteration in save_iterations):
+                time.sleep(20)
                 save_path=scene.model_path + "/chkpnt_contrastive_" + str(iteration) + ".pth"
                 torch.save((gaussians.capture('Features'), iteration),save_path)
                 print("\n[ITER {}] Saving Checkpoint".format(iteration))
-                torch.save(Loss,'loss'.format(iteration))  
+                torch.save(Loss,'loss'.format(iteration)) 
         
 
 
