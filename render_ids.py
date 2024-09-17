@@ -22,7 +22,7 @@ import hdbscan
 
 #{"chair_1": 32, "table_1": 38, "chair_2": 41, "table_2": 43, "sofa_1": 44, "sofa_2": 51, "sofa_3": 58, "sofa_4": 65, "table_3": 75, "chair_3": 80, "chair_4": 90, "chair_5": 93}
 
-def obj_cluster(features,output_save_path,cluster_save_path,recluster):
+def obj_cluster(features,output_save_path,cluster_save_path,recluster=0):
     if os.path.exists(output_save_path) and not recluster:
         labels=np.load(output_save_path)
         return labels
@@ -41,11 +41,13 @@ def saveRGB(label,path,class_n=12):
     if class_n>0:
         img=img.argmax(dim=2, keepdim=True).expand(-1, -1, 3)
         bg=(img==class_n)
+        id_vis=img*255/(class_n+1)
     else:
         img=img.expand(-1,-1,3)
-        bg=(img<0)
+        bg=(img==0)
+        id_vis=img*17%256
 
-    id_vis=img*255/(class_n+1)
+    
     id_vis[:,:,1]=(id_vis[:,:,1]*23)%256
     id_vis[:,:,2]=(id_vis[:,:,2]*13)%256
 
@@ -198,6 +200,7 @@ if __name__ == "__main__":
                 saveRGB(label,save_path)
     
     cluster=False
+    con_id=True
     with torch.no_grad():#with classifier
         if cluster:
             output_save_path='cluster_labels_1.npy'
@@ -224,19 +227,36 @@ if __name__ == "__main__":
                     save_img_u8(img.permute(1,2,0).cpu().detach().numpy(),os.path.join(path,"RGB_"+str(idx)+".png"))
                     save_path=os.path.join(path,f'id{idx:05d}.png')
                     saveRGB(label,save_path)
+        
+        if con_id:
+            vis_path="output/scan6/ids_dirtect/"
+            cluster_save_path='hdbscan_model_1.pkl'
+            output_save_path='cluster_labels_1.npy'
+            labels=obj_cluster(gaussians.get_instance_feature.cpu(),output_save_path,cluster_save_path)+1
+            labels[labels<0]=0
+            gaussians.set_ids(labels)
+            os.makedirs(vis_path,exist_ok=True)
+            for idx, viewpoint in enumerate(viewpoints):
+                render_pkg = render(viewpoint, gaussians, pipe, background,include_feature=True,render_id=True)
+                path=os.path.join(vis_path,f'id{idx:05d}.png')
+                img=render_pkg["instance_image"][0,:,:]+0.5
+                img=img.int()
+                #print(img.sum())
+                saveRGB(img,path,class_n=-1)
+        raise()
     
-    contrastive=True
+    contrastive=0
+    con_id=True
     with torch.no_grad():
         if contrastive:
             output_save_path='cluster_labels_2.npy'
             cluster_save_path='hdbscan_model_2.pkl'
-            recluster=1
+            recluster=0
             all_labels=obj_cluster(gaussians.get_instance_feature.cpu(),output_save_path,cluster_save_path,recluster)
             #clusterer = joblib.load(cluster_save_path)
             # clusterer.generate_prediction_data()
             # label,_ = hdbscan.approximate_predict(clusterer, instance_image.view(-1,16).cpu())
             vis_path="output/scan6/objects_con/"
-            print(np.max(all_labels))
             for obj_id in trange(np.max(all_labels)):
                 path=os.path.join(vis_path,str(obj_id))
                 mask=(all_labels==obj_id)
@@ -249,7 +269,23 @@ if __name__ == "__main__":
                     os.makedirs(path,exist_ok=True)
                     save_img_u8(img.permute(1,2,0).cpu().detach().numpy(),os.path.join(path,"RGB_"+str(idx)+".png"))
                     save_path=os.path.join(path,f'id{idx:05d}.png')
-                    #saveRGB(label,save_path,class_n=-1)
+                    #
+        if con_id:
+            cluster_save_path='hdbscan_model_2.pkl'
+            vis_path="output/scan6/ids_con/"
+            clusterer = joblib.load(cluster_save_path)
+            labels=clusterer.labels_ + 1
+            labels[labels<0]=0
+            gaussians.set_ids(labels)
+            os.makedirs(vis_path,exist_ok=True)
+            for idx, viewpoint in enumerate(viewpoints):
+                render_pkg = render(viewpoint, gaussians, pipe, background,include_feature=True,render_id=True)
+                path=os.path.join(vis_path,f'id{idx:05d}.png')
+                img=render_pkg["instance_image"][0,:,:]+0.5
+                img=img.int()
+                #print(img.sum())
+                saveRGB(img,path,class_n=-1)
+                #save_img_u8(img.permute(1,2,0).cpu().detach().numpy(),os.path.join(path,"RGB_"+str(idx)+".png"))
 
 
 

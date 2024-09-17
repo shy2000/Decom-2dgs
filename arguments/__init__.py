@@ -52,7 +52,7 @@ class ModelParams(ParamGroup):
         self._images = "images"
         self._resolution = -1
         self._white_background = False
-        self.read_instance = False
+        self.trajfile="images/traj.txt"
         self.data_device = "cuda"
         self.eval = False
         self.render_items = ['RGB', 'Alpha', 'Normal', 'Depth', 'Edge', 'Curvature']
@@ -88,7 +88,6 @@ class OptimizationParams(ParamGroup):
         self.lambda_normal = 0.05
         self.opacity_cull = 0.05
 
-
         self.densification_interval = 100
         self.opacity_reset_interval = 3000
         self.densify_from_iter = 500
@@ -96,7 +95,7 @@ class OptimizationParams(ParamGroup):
         self.densify_grad_threshold = 0.0002
 
         self.include_feature=False
-        self.instance_feature_lr=0.01
+        self.instance_feature_lr=0.005
         self.contrastive=False
         self.sample_num=800
         super().__init__(parser, "Optimization Parameters")

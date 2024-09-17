@@ -11,12 +11,12 @@
 
 import torch
 import math
-from diff_id_rasterization import GaussianRasterizationSettings, GaussianRasterizer
+from diff_surfel_rasterization import GaussianRasterizationSettings, GaussianRasterizer
 from scene.gaussian_model import GaussianModel
 from utils.sh_utils import eval_sh
 from utils.point_utils import depth_to_normal
 
-def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, include_feature, scaling_modifier = 1.0, override_color = None,render_id=None):
+def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, scaling_modifier = 1.0, override_color = None):
     """
     Render the scene. 
     
@@ -47,7 +47,6 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
         campos=viewpoint_camera.camera_center,
         prefiltered=False,
         debug=False,
-        include_feature=include_feature
         # pipe.debug
     )
 
@@ -95,31 +94,20 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
     else:
         colors_precomp = override_color
     
-    if include_feature and not render_id:
-        instance_feature_precomp = pc.get_instance_feature
-        instance_feature_precomp = instance_feature_precomp/ (instance_feature_precomp.norm(dim=-1, keepdim=True) + 1e-9)
-        # instance_feature_precomp = torch.sigmoid(instance_feature_precomp)
-    elif render_id:
-        instance_feature_precomp =  torch.zeros(pc.get_instance_feature.shape, dtype=opacity.dtype, device=opacity.device)
-        instance_feature_precomp[:,0]=torch.from_numpy(pc.get_ids)
-    else:
-        instance_feature_precomp = torch.zeros((1,), dtype=opacity.dtype, device=opacity.device)#lang
-
-    rendered_image, instance_image, radii, allmap = rasterizer(
+    rendered_image, radii, allmap = rasterizer(
         means3D = means3D,
         means2D = means2D,
         shs = shs,
         colors_precomp = colors_precomp,
-        instance_feature_precomp =instance_feature_precomp ,
         opacities = opacity,
         scales = scales,
         rotations = rotations,
         cov3D_precomp = cov3D_precomp
     )
+    
     # Those Gaussians that were frustum culled or had a radius of 0 were not visible.
     # They will be excluded from value updates used in the splitting criteria.
     rets =  {"render": rendered_image,
-             "instance_image":instance_image, 
             "viewspace_points": means2D,
             "visibility_filter" : radii > 0,
             "radii": radii,

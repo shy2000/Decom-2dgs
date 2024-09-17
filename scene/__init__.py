@@ -44,7 +44,7 @@ class Scene:
         if os.path.exists(os.path.join(args.source_path, "sparse")):
             if os.path.exists(os.path.join(args.source_path, "cameras.npz")):
                 print("Found cameras.npz file, assuming Replica data set!")
-                scene_info = sceneLoadTypeCallbacks["Replica"](args.source_path, args.read_instance, args.eval)
+                scene_info = sceneLoadTypeCallbacks["Replica"](args.source_path, args.trajfile, args.eval)
             else:
                 scene_info = sceneLoadTypeCallbacks["Colmap"](args.source_path, args.images, args.eval)
         elif os.path.exists(os.path.join(args.source_path, "transforms_train.json")):

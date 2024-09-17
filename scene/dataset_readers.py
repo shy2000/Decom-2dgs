@@ -35,6 +35,7 @@ class CameraInfo(NamedTuple):
     image: np.array
     instance_image:np.array
     sam_mask:np.array
+    depth:np.array
     image_path: str
     image_name: str
     width: int
@@ -122,7 +123,7 @@ def readCameras(scale_mats, world_mats, image_paths,instance_paths):
     sys.stdout.write('\n')
     return cam_infos
 
-def readCamerasFromKeyFrameTraj(path, trajfile,read_sam_mask=True,read_instance=True,per_frame=20):
+def readCamerasFromKeyFrameTraj(path, trajfile,per_frame=20):
     scale = 384 / 680
     offset = (384 - 680 ) * 0.5
     inv_metrix = np.eye(4)
@@ -135,12 +136,10 @@ def readCamerasFromKeyFrameTraj(path, trajfile,read_sam_mask=True,read_instance=
         data_paths = sorted(data_paths)
         return data_paths
     image_paths = glob_data(os.path.join('{0}'.format(path),"images","*_rgb.png"))
-    instance_paths=None
-    sam_paths=None
-    if read_instance:
-        instance_paths = glob_data(os.path.join('{0}'.format(path),"images","instance_mask", "*.png"))
-    if read_sam_mask:
-        sam_paths = glob_data(os.path.join('{0}'.format(path),"sam_masks", "*.npy"))
+
+    instance_paths = glob_data(os.path.join('{0}'.format(path),"images","instance_mask", "*.png"))
+    sam_paths = glob_data(os.path.join('{0}'.format(path),"sam_masks", "*masks.npy"))
+    depth_paths = glob_data(os.path.join('{0}'.format(path),"images","depth", "*.npy"))
 
     with open(os.path.join(path, trajfile)) as txt_file:
         lines = txt_file.readlines()
@@ -181,23 +180,26 @@ def readCamerasFromKeyFrameTraj(path, trajfile,read_sam_mask=True,read_instance=
         FovX = focal2fov(focal_length_x, rgb.size[0])
         FovY = focal2fov(focal_length_y, rgb.size[1])
         if instance_paths:
-            instance_path=instance_paths[idx]
-            instance_image=Image.open(instance_path)
+            instance_image=Image.open(instance_paths[idx])
         else:
             instance_image=None
 
         if sam_paths:
-            sam_path=sam_paths[idx]
-            sam_mask=np.load(sam_path)
-
+            sam_mask=np.load(sam_paths[idx])
         else:
             sam_mask=None
         
+        if depth_paths:
+            depth=np.load(depth_paths[idx])
+        else:
+            depth=None
+
         cam_infos.append(CameraInfo(uid=idx, R=R_w_c, T=T_c_w, FovY=FovY, FovX=FovX, image=rgb,
                                     image_path=rgb_name, image_name=image_name, width=rgb.size[0],
                                     height=rgb.size[1],
                                     instance_image=instance_image,
-                                    sam_mask=sam_mask))
+                                    sam_mask=sam_mask,
+                                    depth=depth))
         idx+=1
     sys.stdout.write('\n')
 
@@ -270,10 +272,11 @@ def storePly(path, xyz, rgb):
     ply_data.write(path)
 
 
-def readReplicaSceneInfo_traj_feature(path, read_instance, eval, llffhold=8):
+def readReplicaSceneInfo_traj_feature(path, trajfile, eval, llffhold=8):
 
-    trajfile='images/traj.txt'
-    cam_infos_unsorted = readCamerasFromKeyFrameTraj(path,trajfile,read_instance)
+    if trajfile==None:
+        trajfile='images/traj.txt'
+    cam_infos_unsorted = readCamerasFromKeyFrameTraj(path,trajfile)
     cam_infos = sorted(cam_infos_unsorted.copy(), key = lambda x : x.image_name)
 
     if eval:
