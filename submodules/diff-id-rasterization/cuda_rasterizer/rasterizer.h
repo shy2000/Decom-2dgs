@@ -92,7 +92,7 @@ namespace CudaRasterizer
 			bool debug,
 			bool include_feature);
 
-		static void id_trace(
+		static void trace(
 			std::function<char* (size_t)> geometryBuffer,
 			std::function<char* (size_t)> binningBuffer,
 			std::function<char* (size_t)> imageBuffer,
@@ -102,7 +102,7 @@ namespace CudaRasterizer
 			const float* means3D,
 			const float* shs,
 			const float* colors_precomp,
-			const float* instance_feature_precomp,
+			float* weights,
 			const float* opacities,
 			const float* scales,
 			const float scale_modifier,
@@ -113,12 +113,10 @@ namespace CudaRasterizer
 			const float* cam_pos,
 			const float tan_fovx, float tan_fovy,
 			const bool prefiltered,
-			float* out_color,
-			float* out_others,
-			float* out_instance_feature,
-			int* radii = nullptr,
-			bool debug = false,
-			bool include_feature = false);
+			int* radii,
+			const int* id_masks,
+			const int num_class,
+			bool debug);
 	};
 };
 

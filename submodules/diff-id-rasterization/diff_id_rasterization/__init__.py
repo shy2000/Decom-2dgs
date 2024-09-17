@@ -232,4 +232,47 @@ class GaussianRasterizer(nn.Module):
             cov3D_precomp,
             raster_settings, 
         )
+    def trace(self, means3D, means2D, opacities,weights,id_masks,num_class, shs = None, colors_precomp = None, scales = None, rotations = None, cov3D_precomp = None):
+        if shs is None:
+            shs = torch.Tensor([]).cuda()
+        if colors_precomp is None:
+            colors_precomp = torch.Tensor([]).cuda()
+        if instance_feature_precomp is None:
+            instance_feature_precomp = torch.Tensor([]).cuda()
+        if scales is None:
+            scales = torch.Tensor([]).cuda()
+        if rotations is None:
+            rotations = torch.Tensor([]).cuda()
+        if cov3D_precomp is None:
+            cov3D_precomp = torch.Tensor([]).cuda()
+        
+        
+
+        raster_settings = self.raster_settings
+        args = (
+            raster_settings.bg,
+            means3D,
+            colors_precomp,
+            weights,
+            opacities,
+            scales,
+            rotations,
+            raster_settings.scale_modifier,
+            cov3D_precomp,
+            raster_settings.viewmatrix,
+            raster_settings.projmatrix,
+            raster_settings.tanfovx,
+            raster_settings.tanfovy,
+            raster_settings.image_height,
+            raster_settings.image_width,
+            shs,
+            raster_settings.sh_degree,
+            raster_settings.campos,
+            raster_settings.prefiltered,
+            id_masks,
+            num_class,
+            raster_settings.debug,
+        )
+        _C.trace(*args)
+        
 

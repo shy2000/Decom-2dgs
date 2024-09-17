@@ -37,7 +37,8 @@ namespace ID_TRACE
         bool prefiltered)
 
 	// Main trace method.
-	void trace(const uint2* __restrict__ ranges,
+	void trace(const dim3 grid, dim3 block,
+        const uint2* __restrict__ ranges,
         const uint32_t* __restrict__ point_list,
         int W, int H,
         float focal_x, float focal_y,
@@ -49,7 +50,7 @@ namespace ID_TRACE
         float* __restrict__ final_T,
         uint32_t* __restrict__ n_contrib,
         const float* __restrict__ bg_color,
-        const float* __restrict__ id_masks,
+        const int* __restrict__ id_masks,
         const int num_class);
 }
 

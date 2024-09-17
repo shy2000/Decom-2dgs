@@ -357,7 +357,7 @@ trace_renderCUDA(
 	
 }
 
-void ID_TRACE::trace(
+void ID_TRACE::trace(const dim3 grid, dim3 block,
 	const uint2* __restrict__ ranges,
 	const uint32_t* __restrict__ point_list,
 	int W, int H,
@@ -370,8 +370,8 @@ void ID_TRACE::trace(
 	float* __restrict__ final_T,
 	uint32_t* __restrict__ n_contrib,
 	const float* __restrict__ bg_color,
-	const float* __restrict__ id_masks,
-	const int num_class
+	const * __restrict__ id_masks,
+	const int* num_class
 )
 {
 	renderCUDA<1> << <grid, block >> > (
