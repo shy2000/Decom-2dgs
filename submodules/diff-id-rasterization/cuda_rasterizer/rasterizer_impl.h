@@ -36,6 +36,7 @@ namespace CudaRasterizer
 		float2* means2D;
 		float* transMat;
 		float4* normal_opacity;
+		float* opacity;
 		float* rgb;
 		uint32_t* point_offsets;
 		uint32_t* tiles_touched;

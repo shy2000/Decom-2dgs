@@ -34,7 +34,7 @@ namespace ID_TRACE
         float* opacity,
         const dim3 grid,
         uint32_t* tiles_touched,
-        bool prefiltered)
+        bool prefiltered);
 
 	// Main trace method.
 	void trace(const dim3 grid, dim3 block,

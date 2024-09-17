@@ -488,7 +488,7 @@ void CudaRasterizer::Rasterizer::trace(
 	int* radii,
 	const int* id_masks,
 	const int num_class,
-	bool debug,)
+	bool debug)
 {
 	const float focal_y = height / (2.0f * tan_fovy);
 	const float focal_x = width / (2.0f * tan_fovx);
@@ -537,7 +537,7 @@ void CudaRasterizer::Rasterizer::trace(
 		geomState.depths,
 		geomState.transMat,
 		geomState.rgb,
-		geomState.normal_opacity,
+		geomState.opacity,
 		tile_grid,
 		geomState.tiles_touched,
 		prefiltered
@@ -596,6 +596,7 @@ void CudaRasterizer::Rasterizer::trace(
 		focal_x, focal_y,
 		geomState.means2D,
 		weights,
+		geomState.transMat,
 		geomState.depths,
 		geomState.opacity,
 		imgState.accum_alpha,

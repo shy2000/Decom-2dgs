@@ -247,7 +247,6 @@ class GaussianRasterizer(nn.Module):
             cov3D_precomp = torch.Tensor([]).cuda()
         
         
-
         raster_settings = self.raster_settings
         args = (
             raster_settings.bg,
